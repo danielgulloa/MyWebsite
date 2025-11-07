@@ -1,0 +1,12 @@
+{
+  "googleCalendar": {
+    "apiKey": "YOUR_GOOGLE_CALENDAR_API_KEY",
+    "calendarId": "primary"
+  },
+  "weather": {
+    "latitude": 34.0234,
+    "longitude": -84.6155,
+    "userAgent": "MyWebsite/1.0 (contact@example.com)",
+    "proxyUrl": ""
+  }
+}
