@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Personal Dashboard</title>
+    <style>
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #111;
+            color: #f5f5f5;
+            position: relative;
+        }
+
+        .panel {
+            position: absolute;
+            width: 50%;
+            height: 50%;
+            box-sizing: border-box;
+            padding: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: auto;
+        }
+
+        #clock-panel {
+            top: 0;
+            left: 0;
+            text-align: center;
+        }
+
+        #countdown-panel {
+            top: 50%;
+            left: 0;
+        }
+
+        #weather-panel {
+            top: 0;
+            left: 50%;
+        }
+
+        #calendar-panel {
+            top: 50%;
+            left: 50%;
+        }
+
+        h2 {
+            margin: 0 0 12px 0;
+            font-size: 26px;
+            letter-spacing: 0.05em;
+        }
+
+        #clock-display {
+            font-size: 140px;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            margin-top: 60px;
+        }
+
+        .current-weather {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
+        }
+
+        .current-weather strong {
+            display: block;
+            font-size: 18px;
+            color: #9ad0ff;
+            margin-bottom: 8px;
+        }
+
+        .current-weather .current-temp {
+            font-size: 32px;
+            font-weight: 600;
+        }
+
+        .countdown-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            font-size: 20px;
+        }
+
+        .countdown-item strong {
+            display: block;
+            font-size: 16px;
+            color: #9ad0ff;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 6px;
+        }
+
+        #calendar-events,
+        #weather-forecast {
+            padding-right: 8px;
+        }
+
+        .event {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .event:last-child {
+            border-bottom: none;
+        }
+
+        .event-time {
+            display: block;
+            font-size: 15px;
+            color: #ffc26f;
+        }
+
+        .weather-day {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .weather-day:last-child {
+            border-bottom: none;
+        }
+
+        .temperature-summary div {
+            margin-bottom: 4px;
+        }
+
+        .subtle {
+            font-size: 14px;
+            opacity: 0.75;
+        }
+
+        a {
+            color: #9ad0ff;
+        }
+
+        @media screen and (max-width: 900px) {
+            .panel {
+                position: static;
+                width: auto;
+                height: auto;
+            }
+
+            #clock-display {
+                font-size: 96px;
+                margin-top: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <section class="panel" id="clock-panel" aria-label="Current time in Eastern Time">
+        <div id="clock-display" aria-live="polite">--:--</div>
+    </section>
+
+    <section class="panel" id="calendar-panel">
+        <h2>Google Calendar</h2>
+        <div class="subtle">
+            Showing events for today and tomorrow. Add your Google Calendar API key and calendar ID to <code>config.json</code> (see <code>config.example.json</code>).
+        </div>
+        <div id="calendar-events">Loading events...</div>
+    </section>
+
+    <section class="panel" id="countdown-panel">
+        <h2>Countdowns</h2>
+        <div class="countdown-list" id="countdown-list"></div>
+    </section>
+
+    <section class="panel" id="weather-panel">
+        <h2>Kennesaw Forecast</h2>
+        <div class="subtle">3-day outlook from the National Weather Service.</div>
+        <div id="current-weather" class="current-weather" hidden></div>
+        <div id="weather-forecast">Loading forecast...</div>
+    </section>
+
+    <script>
+        (function () {
+            // === Utilities ===
+            function pad(number) {
+                return number < 10 ? "0" + number : "" + number;
+            }
+
+            function stringTrim(value) {
+                return value ? value.replace(/^\s+|\s+$/g, "") : "";
+            }
+
+            function cloneObject(source) {
+                var result = {};
+                for (var key in source) {
+                    if (source.hasOwnProperty(key)) {
+                        result[key] = source[key];
+                    }
+                }
+                return result;
+            }
+
+            function toIsoStringUTC(date) {
+                return (
+                    date.getUTCFullYear() +
+                    "-" + pad(date.getUTCMonth() + 1) +
+                    "-" + pad(date.getUTCDate()) +
+                    "T" + pad(date.getUTCHours()) +
+                    ":" + pad(date.getUTCMinutes()) +
+                    ":" + pad(date.getUTCSeconds()) +
+                    "Z"
+                );
+            }
+
+            function makeRequest(url, headers, callback) {
+                var xhr = new XMLHttpRequest();
+                xhr.open("GET", url, true);
+                if (headers) {
+                    for (var header in headers) {
+                        if (headers.hasOwnProperty(header) && headers[header] !== undefined) {
+                            try {
+                                xhr.setRequestHeader(header, headers[header]);
+                            } catch (setHeaderError) {
+                                // Older browsers (including legacy Safari) forbid setting certain headers
+                                // such as User-Agent. Silently skip headers that cannot be applied so the
+                                // request can proceed with the defaults supplied by the browser.
+                            }
+                        }
+                    }
+                }
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState === 4) {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            callback(null, xhr);
+                        } else {
+                            callback(new Error("Request failed (" + xhr.status + ")"), xhr);
+                        }
+                    }
+                };
+                xhr.send(null);
+            }
+
+            function getSecondSundayInMarch(year) {
+                var date = new Date(Date.UTC(year, 2, 1));
+                while (date.getUTCDay() !== 0) {
+                    date.setUTCDate(date.getUTCDate() + 1);
+                }
+                date.setUTCDate(date.getUTCDate() + 7);
+                return date;
+            }
+
+            function getFirstSundayInNovember(year) {
+                var date = new Date(Date.UTC(year, 10, 1));
+                while (date.getUTCDay() !== 0) {
+                    date.setUTCDate(date.getUTCDate() + 1);
+                }
+                return date;
+            }
+
+            function isEasternDaylightSaving(utcMilliseconds) {
+                var date = new Date(utcMilliseconds);
+                var year = date.getUTCFullYear();
+                var dstStart = getSecondSundayInMarch(year);
+                var dstStartUtc = Date.UTC(year, 2, dstStart.getUTCDate(), 7, 0, 0);
+                var dstEnd = getFirstSundayInNovember(year);
+                var dstEndUtc = Date.UTC(year, 10, dstEnd.getUTCDate(), 6, 0, 0);
+                return utcMilliseconds >= dstStartUtc && utcMilliseconds < dstEndUtc;
+            }
+
+            function getEasternDate(now) {
+                var utc = now.getTime();
+                var offsetHours = isEasternDaylightSaving(utc) ? -4 : -5;
+                return new Date(utc + offsetHours * 3600000);
+            }
+
+            // === Clock (Eastern Time) ===
+            var clockDisplay = document.getElementById("clock-display");
+
+            function updateClock() {
+                var now = new Date();
+                var eastern = getEasternDate(now);
+                var hours = eastern.getUTCHours();
+                var minutes = eastern.getUTCMinutes();
+                clockDisplay.textContent = pad(hours) + ":" + pad(minutes);
+            }
+
+            updateClock();
+            setInterval(updateClock, 1000);
+
+            // === Config ===
+            var defaultConfig = {
+                googleCalendar: {
+                    apiKey: "",
+                    calendarId: "primary"
+                },
+                weather: {
+                    latitude: 34.0234,
+                    longitude: -84.6155,
+                    userAgent: "",
+                    proxyUrl: ""
+                }
+            };
+
+            var googleCalendarConfig = cloneObject(defaultConfig.googleCalendar);
+            var weatherConfig = cloneObject(defaultConfig.weather);
+
+            function loadConfig(callback) {
+                makeRequest("config.json?_=" + new Date().getTime(), null, function (error, xhr) {
+                    if (!error) {
+                        try {
+                            var data = JSON.parse(xhr.responseText);
+                            googleCalendarConfig = cloneObject(defaultConfig.googleCalendar);
+                            weatherConfig = cloneObject(defaultConfig.weather);
+                            if (data.googleCalendar) {
+                                for (var key in data.googleCalendar) {
+                                    if (data.googleCalendar.hasOwnProperty(key)) {
+                                        googleCalendarConfig[key] = data.googleCalendar[key];
+                                    }
+                                }
+                            }
+                            if (data.weather) {
+                                for (var wKey in data.weather) {
+                                    if (data.weather.hasOwnProperty(wKey)) {
+                                        weatherConfig[wKey] = data.weather[wKey];
+                                    }
+                                }
+                            }
+                        } catch (parseError) {
+                            console.log("Unable to parse config.json, using defaults.");
+                            googleCalendarConfig = cloneObject(defaultConfig.googleCalendar);
+                            weatherConfig = cloneObject(defaultConfig.weather);
+                        }
+                    } else {
+                        console.log("config.json not found, using defaults.");
+                        googleCalendarConfig = cloneObject(defaultConfig.googleCalendar);
+                        weatherConfig = cloneObject(defaultConfig.weather);
+                    }
+                    callback();
+                });
+            }
+
+            // === Google Calendar Events (Today + Tomorrow) ===
+            var calendarEventsContainer = document.getElementById("calendar-events");
+
+            function formatDateLabel(isoDate) {
+                var parts = isoDate.split("-");
+                if (parts.length !== 3) {
+                    return isoDate;
+                }
+                var year = parseInt(parts[0], 10);
+                var month = parseInt(parts[1], 10) - 1;
+                var day = parseInt(parts[2], 10);
+                var date = new Date(year, month, day);
+                var weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                return weekdays[date.getDay()] + ", " + months[month] + " " + day;
+            }
+
+            function formatTimeLabel(dateTime) {
+                var date = new Date(dateTime);
+                var hours = date.getHours();
+                var minutes = date.getMinutes();
+                var period = hours >= 12 ? "PM" : "AM";
+                var displayHour = hours % 12;
+                if (displayHour === 0) {
+                    displayHour = 12;
+                }
+                return displayHour + ":" + pad(minutes) + " " + period;
+            }
+
+            function formatDateRange(start, end) {
+                if (start.date && (!end || start.date === end.date)) {
+                    return formatDateLabel(start.date) + " · All Day";
+                }
+
+                var startLabel = start.date ? formatDateLabel(start.date) : formatDateLabel(start.dateTime.substr(0, 10));
+                var startTime = start.dateTime ? formatTimeLabel(start.dateTime) : "All Day";
+
+                if (!end) {
+                    return startLabel + " · " + startTime;
+                }
+
+                var endLabel = end.date ? formatDateLabel(end.date) : formatDateLabel(end.dateTime.substr(0, 10));
+                var endTime = end.dateTime ? formatTimeLabel(end.dateTime) : "All Day";
+
+                if (startLabel === endLabel) {
+                    return startLabel + " · " + startTime + " – " + endTime;
+                }
+
+                return startLabel + " " + startTime + " → " + endLabel + " " + endTime;
+            }
+
+            function fetchCalendarEvents() {
+                var apiKey = stringTrim(googleCalendarConfig.apiKey);
+                if (!apiKey) {
+                    calendarEventsContainer.innerHTML = "<p>Please add your Google Calendar API key and calendar ID to config.json (see config.example.json).</p>";
+                    return;
+                }
+
+                var now = new Date();
+                var todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+                var tomorrowEnd = new Date(todayStart.getTime());
+                tomorrowEnd.setUTCDate(tomorrowEnd.getUTCDate() + 2);
+
+                var timeMin = toIsoStringUTC(todayStart);
+                var timeMax = toIsoStringUTC(tomorrowEnd);
+
+                var baseUrl = "https://www.googleapis.com/calendar/v3/calendars/" + encodeURIComponent(googleCalendarConfig.calendarId || "primary") + "/events";
+                var params = "?key=" + encodeURIComponent(apiKey) +
+                    "&timeMin=" + encodeURIComponent(timeMin) +
+                    "&timeMax=" + encodeURIComponent(timeMax) +
+                    "&singleEvents=true&orderBy=startTime";
+
+                makeRequest(baseUrl + params, null, function (error, xhr) {
+                    if (error) {
+                        calendarEventsContainer.innerHTML = "<p>Unable to load events. " + error.message + "</p>";
+                        return;
+                    }
+                    try {
+                        var data = JSON.parse(xhr.responseText);
+                        renderCalendarEvents(data.items || []);
+                    } catch (parseError) {
+                        calendarEventsContainer.innerHTML = "<p>Unable to read calendar response.</p>";
+                    }
+                });
+            }
+
+            function renderCalendarEvents(events) {
+                if (!events || events.length === 0) {
+                    calendarEventsContainer.innerHTML = "<p>No events scheduled for today or tomorrow.</p>";
+                    return;
+                }
+
+                var fragment = document.createDocumentFragment();
+                for (var i = 0; i < events.length; i += 1) {
+                    var event = events[i];
+                    var div = document.createElement("div");
+                    div.className = "event";
+
+                    var summary = document.createElement("strong");
+                    summary.appendChild(document.createTextNode(event.summary || "Untitled Event"));
+                    div.appendChild(summary);
+
+                    if (event.start) {
+                        var time = document.createElement("span");
+                        time.className = "event-time";
+                        time.appendChild(document.createTextNode(formatDateRange(event.start, event.end || null)));
+                        div.appendChild(time);
+                    }
+
+                    if (event.location) {
+                        var location = document.createElement("div");
+                        location.className = "subtle";
+                        location.appendChild(document.createTextNode(event.location));
+                        div.appendChild(location);
+                    }
+
+                    if (event.description) {
+                        var description = document.createElement("div");
+                        description.className = "subtle";
+                        description.appendChild(document.createTextNode(event.description));
+                        div.appendChild(description);
+                    }
+
+                    fragment.appendChild(div);
+                }
+
+                calendarEventsContainer.innerHTML = "";
+                calendarEventsContainer.appendChild(fragment);
+            }
+
+            // === Countdowns ===
+            var countdownTargets = [
+                { label: "Countdown to June 11, 2026", date: "2026-06-11T00:00:00-04:00" },
+                { label: "Countdown to December 25, 2025", date: "2025-12-25T00:00:00-05:00" }
+            ];
+
+            var countdownList = document.getElementById("countdown-list");
+
+            function updateCountdowns() {
+                countdownList.innerHTML = "";
+                var now = new Date();
+
+                for (var i = 0; i < countdownTargets.length; i += 1) {
+                    var target = countdownTargets[i];
+                    var targetDate = new Date(target.date);
+                    var diffMs = targetDate.getTime() - now.getTime();
+
+                    var div = document.createElement("div");
+                    div.className = "countdown-item";
+
+                    var label = document.createElement("strong");
+                    label.appendChild(document.createTextNode(target.label));
+                    div.appendChild(label);
+
+                    var content = document.createElement("div");
+                    if (diffMs <= 0) {
+                        content.appendChild(document.createTextNode("The date has arrived!"));
+                    } else {
+                        var totalMinutes = Math.floor(diffMs / (1000 * 60));
+                        var days = Math.floor(totalMinutes / (60 * 24));
+                        var hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+                        var minutes = totalMinutes % 60;
+                        content.appendChild(document.createTextNode(days + " days, " + hours + " hours, " + minutes + " minutes"));
+                    }
+                    div.appendChild(content);
+                    countdownList.appendChild(div);
+                }
+            }
+
+            updateCountdowns();
+            setInterval(updateCountdowns, 60000);
+
+            // === Weather Forecast (Kennesaw, GA) ===
+            var weatherContainer = document.getElementById("weather-forecast");
+            var currentWeatherContainer = document.getElementById("current-weather");
+
+            function formatCurrentTemperature(fahrenheit, celsius) {
+                return Math.round(fahrenheit) + "°F / " + Math.round(celsius) + "°C";
+            }
+
+            function renderCurrentWeather(observation) {
+                if (!observation || !observation.properties) {
+                    currentWeatherContainer.hidden = true;
+                    currentWeatherContainer.innerHTML = "";
+                    return;
+                }
+
+                var properties = observation.properties;
+                var description = properties.textDescription ? properties.textDescription : "Current conditions";
+                var temperatureC = properties.temperature && typeof properties.temperature.value === "number" ? properties.temperature.value : null;
+                var temperatureF = temperatureC !== null ? temperatureC * 9 / 5 + 32 : null;
+
+                currentWeatherContainer.innerHTML = "";
+
+                var title = document.createElement("strong");
+                title.appendChild(document.createTextNode(description));
+                currentWeatherContainer.appendChild(title);
+
+                var temp = document.createElement("div");
+                temp.className = "current-temp";
+                if (temperatureF !== null) {
+                    temp.appendChild(document.createTextNode(formatCurrentTemperature(temperatureF, temperatureC)));
+                } else {
+                    temp.appendChild(document.createTextNode("Current temperature unavailable"));
+                }
+                currentWeatherContainer.appendChild(temp);
+                currentWeatherContainer.hidden = false;
+            }
+
+            function fahrenheitToCelsius(fahrenheit) {
+                return (fahrenheit - 32) * (5 / 9);
+            }
+
+            function formatFullDateLabel(isoDate) {
+                var parts = isoDate.split("-");
+                if (parts.length !== 3) {
+                    return isoDate;
+                }
+                var year = parseInt(parts[0], 10);
+                var month = parseInt(parts[1], 10) - 1;
+                var day = parseInt(parts[2], 10);
+                var date = new Date(year, month, day);
+                var weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+                var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                return weekdays[date.getDay()] + ", " + months[month] + " " + day;
+            }
+
+            function renderForecast(periods) {
+                if (!periods || periods.length === 0) {
+                    weatherContainer.innerHTML = "<p>No forecast data available.</p>";
+                    return;
+                }
+
+                var dailyMap = {};
+                var dayOrder = [];
+                var maxDays = 3;
+
+                for (var i = 0; i < periods.length; i += 1) {
+                    var period = periods[i];
+                    if (!period.startTime || typeof period.temperature !== "number") {
+                        continue;
+                    }
+
+                    var dayKey = period.startTime.substr(0, 10);
+                    if (!dailyMap[dayKey]) {
+                        if (dayOrder.length >= maxDays) {
+                            break;
+                        }
+                        dailyMap[dayKey] = {
+                            label: formatFullDateLabel(dayKey),
+                            highF: null,
+                            lowF: null,
+                            details: []
+                        };
+                        dayOrder.push(dayKey);
+                    }
+
+                    var entry = dailyMap[dayKey];
+                    var temperatureF = period.temperatureUnit === "F" ? period.temperature : period.temperature * 9 / 5 + 32;
+
+                    if (entry.highF === null || temperatureF > entry.highF) {
+                        entry.highF = temperatureF;
+                    }
+                    if (entry.lowF === null || temperatureF < entry.lowF) {
+                        entry.lowF = temperatureF;
+                    }
+
+                    if (period.detailedForecast) {
+                        entry.details.push(period.detailedForecast);
+                    } else if (period.shortForecast) {
+                        entry.details.push(period.shortForecast);
+                    }
+                }
+
+                if (dayOrder.length === 0) {
+                    weatherContainer.innerHTML = "<p>No forecast data available.</p>";
+                    return;
+                }
+
+                var fragment = document.createDocumentFragment();
+                for (var j = 0; j < dayOrder.length && j < maxDays; j += 1) {
+                    var key = dayOrder[j];
+                    var day = dailyMap[key];
+                    var div = document.createElement("div");
+                    div.className = "weather-day";
+
+                    var name = document.createElement("strong");
+                    name.appendChild(document.createTextNode(day.label));
+                    div.appendChild(name);
+
+                    var temps = document.createElement("div");
+                    temps.className = "temperature-summary";
+
+                    if (day.highF !== null) {
+                        var high = document.createElement("div");
+                        high.appendChild(document.createTextNode("High: " + Math.round(day.highF) + "°F / " + Math.round(fahrenheitToCelsius(day.highF)) + "°C"));
+                        temps.appendChild(high);
+                    }
+
+                    if (day.lowF !== null) {
+                        var low = document.createElement("div");
+                        low.appendChild(document.createTextNode("Low: " + Math.round(day.lowF) + "°F / " + Math.round(fahrenheitToCelsius(day.lowF)) + "°C"));
+                        temps.appendChild(low);
+                    }
+
+                    div.appendChild(temps);
+
+                    if (day.details.length > 0) {
+                        var details = document.createElement("div");
+                        details.className = "subtle";
+                        details.appendChild(document.createTextNode(day.details[0]));
+                        div.appendChild(details);
+                    }
+
+                    fragment.appendChild(div);
+                }
+
+                weatherContainer.innerHTML = "";
+                weatherContainer.appendChild(fragment);
+            }
+
+            function fetchLatestObservation(stationsUrl, headers, callback) {
+                makeRequest(stationsUrl, headers, function (error, xhr) {
+                    if (error) {
+                        callback(null);
+                        return;
+                    }
+
+                    try {
+                        var stationsData = JSON.parse(xhr.responseText);
+                        var stationId = stationsData && stationsData.features && stationsData.features.length ? stationsData.features[0].id : null;
+                        if (!stationId) {
+                            callback(null);
+                            return;
+                        }
+
+                        makeRequest(stationId + "/observations/latest", headers, function (obsError, obsXhr) {
+                            if (obsError) {
+                                callback(null);
+                                return;
+                            }
+                            try {
+                                callback(JSON.parse(obsXhr.responseText));
+                            } catch (obsParseError) {
+                                callback(null);
+                            }
+                        });
+                    } catch (parseError) {
+                        callback(null);
+                    }
+                });
+            }
+
+            function appendCacheBust(url) {
+                var separator = url.indexOf("?") === -1 ? "?" : "&";
+                return url + separator + "_=" + new Date().getTime();
+            }
+
+            function fetchWeatherThroughProxy(proxyUrl) {
+                makeRequest(appendCacheBust(proxyUrl), null, function (error, xhr) {
+                    if (error) {
+                        currentWeatherContainer.hidden = true;
+                        var message = "Unable to load the forecast via proxy. " + error.message;
+                        if (error.message.indexOf("(0)") !== -1) {
+                            message +=
+                                " This usually means the proxy endpoint is unreachable from this device.";
+                        }
+                        weatherContainer.innerHTML = "<p>" + message + "</p>";
+                        return;
+                    }
+
+                    try {
+                        var data = JSON.parse(xhr.responseText);
+                        var forecastData = data && data.forecast ? data.forecast : null;
+                        var observationData = data && data.observation ? data.observation : null;
+
+                        if (!forecastData || !forecastData.periods) {
+                            weatherContainer.innerHTML = "<p>Proxy response missing forecast data.</p>";
+                            currentWeatherContainer.hidden = true;
+                            return;
+                        }
+
+                        renderForecast(forecastData.periods);
+                        renderCurrentWeather(observationData);
+                    } catch (parseError) {
+                        weatherContainer.innerHTML = "<p>Unable to read proxy response.</p>";
+                        currentWeatherContainer.hidden = true;
+                    }
+                });
+            }
+
+            function fetchWeather() {
+                var proxyUrl = stringTrim(weatherConfig.proxyUrl);
+                if (proxyUrl) {
+                    fetchWeatherThroughProxy(proxyUrl);
+                    return;
+                }
+
+                var contactInfo = stringTrim(weatherConfig.userAgent);
+                if (!contactInfo) {
+                    weatherContainer.innerHTML = "<p>Please supply a contact email (or similar identifier) in config.json so requests to api.weather.gov include a way to contact you.</p>";
+                    currentWeatherContainer.hidden = true;
+                    return;
+                }
+
+                var userAgentHeader = contactInfo;
+                if (userAgentHeader.indexOf("/") === -1 && userAgentHeader.indexOf("(") === -1) {
+                    userAgentHeader = "DashboardDisplay/1.0 (" + contactInfo + ")";
+                }
+
+                var pointUrl = "https://api.weather.gov/points/" + weatherConfig.latitude + "," + weatherConfig.longitude;
+                var headers = { "Accept": "application/geo+json", From: contactInfo, "User-Agent": userAgentHeader };
+
+                makeRequest(pointUrl, headers, function (error, xhr) {
+                    if (error) {
+                        currentWeatherContainer.hidden = true;
+                        var failureMessage = "Unable to load the forecast. " + error.message;
+                        if (error.message.indexOf("(0)") !== -1) {
+                            failureMessage +=
+                                " This often happens on older devices that cannot connect to modern HTTPS services. Consider configuring a proxyUrl in config.json so a newer computer fetches the forecast.";
+                        }
+                        weatherContainer.innerHTML = "<p>" + failureMessage + "</p>";
+                        return;
+                    }
+
+                    var pointData;
+                    try {
+                        pointData = JSON.parse(xhr.responseText);
+                    } catch (parseError) {
+                        currentWeatherContainer.hidden = true;
+                        weatherContainer.innerHTML = "<p>Unable to read forecast location details.</p>";
+                        return;
+                    }
+
+                    var properties = pointData && pointData.properties ? pointData.properties : null;
+                    if (!properties || !properties.forecast) {
+                        currentWeatherContainer.hidden = true;
+                        var errorMessage = "Forecast URL unavailable.";
+                        if (pointData && pointData.status) {
+                            errorMessage =
+                                "National Weather Service returned status " +
+                                pointData.status +
+                                (pointData.detail ? ": " + pointData.detail : ". Please confirm the contact email in config.json is correct.");
+                        }
+                        weatherContainer.innerHTML = "<p>" + errorMessage + "</p>";
+                        return;
+                    }
+
+                    makeRequest(properties.forecast, headers, function (forecastError, forecastXhr) {
+                        if (forecastError) {
+                            currentWeatherContainer.hidden = true;
+                            var forecastFailure = "Unable to load the forecast. " + forecastError.message;
+                            if (forecastError.message.indexOf("(0)") !== -1) {
+                                forecastFailure +=
+                                    " This often happens on older devices that cannot connect to modern HTTPS services. Consider configuring a proxyUrl in config.json so a newer computer fetches the forecast.";
+                            }
+                            weatherContainer.innerHTML = "<p>" + forecastFailure + "</p>";
+                            return;
+                        }
+
+                        try {
+                            var forecastData = JSON.parse(forecastXhr.responseText);
+                            renderForecast(forecastData && forecastData.properties ? forecastData.properties.periods : []);
+                        } catch (forecastParseError) {
+                            weatherContainer.innerHTML = "<p>Unable to read forecast data.</p>";
+                            currentWeatherContainer.hidden = true;
+                        }
+                    });
+
+                    if (properties.observationStations) {
+                        fetchLatestObservation(properties.observationStations, headers, function (observation) {
+                            renderCurrentWeather(observation);
+                        });
+                    } else {
+                        renderCurrentWeather(null);
+                    }
+                });
+            }
+
+            loadConfig(function () {
+                fetchCalendarEvents();
+                fetchWeather();
+            });
+        })();
+    </script>
+</body>
+</html>
